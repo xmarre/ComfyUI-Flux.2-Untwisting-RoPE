@@ -96,15 +96,58 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         shell: bash
         run: |
+          tag_exists=false
+          tag_sha=""
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            tag_exists=true
             tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq '.sha')"
-            if [[ "${tag_sha}" != "${RELEASE_SHA}" ]]; then
-              echo "Tag ${TAG} already points at ${tag_sha}, not tested commit ${RELEASE_SHA}." >&2
-              exit 1
-            fi
           fi
 
-          if gh release view "${TAG}" >/dev/null 2>&1; then
+          release_exists=false
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            release_exists=true
+          fi
+
+          if [[ "${tag_exists}" == "true" && "${tag_sha}" != "${RELEASE_SHA}" ]]; then
+            compare="repos/${GITHUB_REPOSITORY}/compare/${tag_sha}...${RELEASE_SHA}"
+            compare_status="$(gh api "${compare}" --jq '.status')"
+            if [[ "${compare_status}" != "ahead" ]]; then
+              echo "Existing tag ${TAG} at ${tag_sha} is not an ancestor of tested main ${RELEASE_SHA}; refusing to reuse the release version." >&2
+              exit 1
+            fi
+
+            file_count="$(gh api "${compare}" --jq '.files | length')"
+            if (( file_count >= 300 )); then
+              echo "Comparison reached GitHub's 300-file response limit; refusing to classify the version as release-metadata-only." >&2
+              exit 1
+            fi
+
+            mapfile -t changed_files < <(gh api "${compare}" --jq '.files[].filename')
+            metadata_only=true
+            for path in "${changed_files[@]}"; do
+              case "${path}" in
+                README.md|RELEASE_NOTES.md|.github/workflows/release.yml|.github/workflows/publish.yml) ;;
+                *) metadata_only=false ;;
+              esac
+            done
+
+            if [[ "${metadata_only}" != "true" ]]; then
+              echo "Tag ${TAG} already points at ${tag_sha}, while tested main ${RELEASE_SHA} contains non-release-metadata changes with the same package version." >&2
+              echo "Bump the package version before publishing those changes." >&2
+              exit 1
+            fi
+
+            if [[ "${release_exists}" != "true" ]]; then
+              echo "Tag ${TAG} exists at ${tag_sha}, but the GitHub release is missing; refusing to create a release from a different tested commit." >&2
+              exit 1
+            fi
+
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+            echo "Release ${TAG} already exists at ${tag_sha}; tested main differs only by release/documentation automation, so the published release remains immutable."
+            exit 0
+          fi
+
+          if [[ "${release_exists}" == "true" ]]; then
             echo "skip=true" >> "${GITHUB_OUTPUT}"
             echo "Release ${TAG} already exists at the tested commit; leaving it unchanged."
           else
@@ -142,6 +185,7 @@ jobs:
           gh release create "${TAG}" \
             "dist/ComfyUI-Untwisting-RoPE-v${VERSION}.zip" \
             "dist/SHA256SUMS" \
+            --repo "${GITHUB_REPOSITORY}" \
             --target "${RELEASE_SHA}" \
             --title "ComfyUI Untwisting RoPE ${TAG}" \
             --notes-file CURRENT_RELEASE_NOTES.md
