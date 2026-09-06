@@ -7,13 +7,18 @@ on:
         description: Published GitHub release tag to publish
         required: true
         type: string
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish.yml"
 
 permissions:
   contents: read
   issues: write
 
 concurrency:
-  group: comfy-registry-${{ inputs.tag }}
+  group: comfy-registry-${{ inputs.tag || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -23,35 +28,49 @@ jobs:
     if: ${{ github.repository_owner == 'xmarre' }}
 
     steps:
-      - name: Validate published release tag
+      - name: Check out workflow source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve and validate published release tag
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
+          REQUESTED_TAG: ${{ inputs.tag }}
         shell: bash
         run: |
-          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid release tag: ${TAG}" >&2
+          if [[ -n "${REQUESTED_TAG}" ]]; then
+            tag="${REQUESTED_TAG}"
+          else
+            version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+            tag="v${version}"
+          fi
+
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: ${tag}" >&2
             exit 1
           fi
 
-          is_draft="$(gh release view "${TAG}" --json isDraft --jq '.isDraft')"
+          is_draft="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')"
           if [[ "${is_draft}" != "false" ]]; then
-            echo "Release ${TAG} is not published." >&2
+            echo "Release ${tag} is not published." >&2
             exit 1
           fi
 
-          gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq '.sha' >/dev/null
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${tag}" --jq '.sha' >/dev/null
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
 
       - name: Check out released code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
           submodules: true
-          ref: ${{ inputs.tag }}
+          ref: ${{ steps.release.outputs.tag }}
 
       - name: Verify package version matches release tag
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ steps.release.outputs.tag }}
         shell: bash
         run: |
           version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
