@@ -70,6 +70,23 @@ jobs:
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
 
+      - name: Prepare GitHub release body
+        if: steps.current.outputs.is_current == 'true'
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("RELEASE_NOTES.md")
+          lines = path.read_text(encoding="utf-8").splitlines()
+          if not lines or not lines[0].startswith("# "):
+              raise SystemExit("RELEASE_NOTES.md must start with a level-1 release heading")
+          body = "\n".join(lines[1:]).lstrip("\n") + "\n"
+          if not body.strip():
+              raise SystemExit("GitHub release body is empty after removing the release heading")
+          Path("CURRENT_RELEASE_NOTES.md").write_text(body, encoding="utf-8")
+          PY
+
       - name: Check existing tag and release
         if: steps.current.outputs.is_current == 'true'
         id: existing
@@ -127,7 +144,7 @@ jobs:
             "dist/SHA256SUMS" \
             --target "${RELEASE_SHA}" \
             --title "ComfyUI Untwisting RoPE ${TAG}" \
-            --notes-file RELEASE_NOTES.md
+            --notes-file CURRENT_RELEASE_NOTES.md
 
       - name: Dispatch Comfy registry publication
         if: >-

@@ -1,35 +1,26 @@
-# ComfyUI Untwisting RoPE v0.2.2
+# ComfyUI Untwisting RoPE v0.2.3
 
-v0.2.2 corrects the MiniMax H3 release defaults so the shipped node matches the tested configuration.
+This release adds the versioned MiniMax H3 visual-reference capability used by Spectrum to avoid a redundant terminal SA-Solver PECE predictor evaluation in the narrowly reviewed safe envelope.
 
-## Correct MiniMax H3 defaults
+## MiniMax H3 terminal PECE capability
 
-The exact H3 defaults are now:
+- Bumps the namespaced MiniMax H3 visual-reference profile/runtime contract to schema v2.
+- Publishes `terminal_pece_exact_corrector_safe=true` only when the Untwist profile is the reviewed weak terminal spatial-only case: `progress_start == 0`, `0.90 <= progress_end < 1.0`, aggregate scale strength `<= 0.05`, `image_only` or `image_and_video`, and no temporal-axis scaling.
+- All other profiles publish the capability as `false`.
+- The capability is eligibility metadata only. Spectrum still has to prove active PECE topology, an immediate same-outer corrected phase, and an exact persistent corrected endpoint before it may keep the terminal predictor forecasted.
+- Untwist's configured denoising window is unchanged. The normalized-sigma lower boundary remains `1 - end_percent`; the usual `end_percent=0.95` case therefore reports `0.05` rather than extending Untwist through the final denoiser call.
 
-```text
-high_scale_start    = 0.95
-high_scale_end      = 1.00
-low_scale_start     = 1.00
-low_scale_end       = 1.05
-beta                = 2.0
-start_percent       = 0.0
-end_percent         = 0.90
-verbose             = false
-reference_scope     = image_and_video
-scale_temporal_axis = false
-```
+## Compatibility and failure policy
 
-The previous release incorrectly shipped `high_scale_end = 1.05`. This release corrects that value to `1.00` everywhere it can affect or describe the H3 default contract:
+- Schema-v1 consumers remain conservative and receive no terminal-PECE capability.
+- Unknown, strong, early, temporal, Continuum-reference-inclusive, malformed, or mismatched profiles remain on the ordinary exact hard-boundary path.
+- Native Untwist attention math, defaults, reference selection, Continuum exclusion, and Flux/Flux.2 behavior are unchanged.
+- The existing Comfy Registry package ID remains unchanged.
 
-- ComfyUI node UI default;
-- H3 input sanitization fallback;
-- attention-helper fallback values when a runtime configuration omits scale keys;
-- Spectrum profile regression expectations;
-- README and source-analysis documentation;
-- explicit regression coverage for the complete release-default set and fallback schedule endpoints.
+## Validation
 
-Flux/Flux.2 behavior and defaults are unchanged.
+PR #5 passed its 39-test suite, Ruff critical checks, `compileall`, and GitHub Actions run 22. The merged `main` commit also passed tests run 23.
 
-## Project branding
+The companion Spectrum implementation was validated with matched MiniMax H3 decoded-media A/B testing and follow-up Continuum workflows. The shortest exercised progressive high-stage lifetime uses `P0 actual -> P1 forecast -> C1 actual`; both tested high-stage invocations confirmed the exact same-outer corrector with zero terminal fail-safe events and zero Spectrum fallbacks.
 
-The generic `ComfyUI-Untwisting-RoPE` repository/display branding introduced in v0.2.1 is retained. The legacy `[project].name = "comfyui-flux2-untwisting-rope"` value remains intentionally unchanged because it is the existing Comfy Registry node ID.
+Companion consumer: https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3/pull/98
