@@ -418,16 +418,24 @@ def _scaled_h3_reference_keys(k: torch.Tensor, cfg: Dict[str, Any]) -> torch.Ten
 def make_minimax_h3_attention_override(previous_override: Optional[Callable[..., Any]] = None) -> Callable[..., Any]:
     """Compose H3 post-RoPE key modulation with an existing optimized-attention override."""
 
-    def override(original: Callable[..., Any], q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, heads: int, *args: Any, **kwargs: Any):
+    def preprocess(q, k, v, heads, **kwargs):
         transformer_options = kwargs.get("transformer_options", None)
         cfg = transformer_options.get("minimax_h3_untwist_rope", None) if isinstance(transformer_options, dict) else None
         if isinstance(cfg, dict) and cfg.get("enabled", False):
             k = _scaled_h3_reference_keys(k, cfg)
+        return q, k, v
+
+    def override(original: Callable[..., Any], q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, heads: int, *args: Any, **kwargs: Any):
+        q, k, v = preprocess(q, k, v, heads, **kwargs)
 
         if previous_override is not None:
             return previous_override(original, q, k, v, heads, *args, **kwargs)
         return original(q, k, v, heads, *args, **kwargs)
 
+    # Optional generic QKV preprocessing contract. A numerical attention backend
+    # can preserve this transform before sparse dispatch and keep the inherited
+    # dense provider for dense-required rows, without applying K scaling twice.
+    override.attention_preprocess_v1 = (preprocess, previous_override)
     return override
 
 

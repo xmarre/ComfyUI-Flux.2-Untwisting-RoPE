@@ -289,3 +289,16 @@ def test_h3_attention_override_chains_existing_override_after_scaling():
     )
     assert torch.allclose(seen["k"][0, 0, 0], torch.tensor([0.5, 0.5, 1.0, 1.0]))
     assert torch.allclose(seen["k"][0, 0, 1], torch.ones(4))
+
+
+def test_h3_attention_preprocess_contract_matches_composed_override():
+    from flux_untwist.patches import make_minimax_h3_attention_override
+    q, k, v = (torch.randn(1, 2, 5, 8) for _ in range(3))
+    def dense(original, q, k, v, heads, **kw):
+        return q + k + v
+    override = make_minimax_h3_attention_override(dense)
+    transform, inherited = override.attention_preprocess_v1
+    options = {"transformer_options": {"minimax_h3_untwist_rope": {"enabled": False}}}
+    transformed = transform(q, k, v, 2, **options)
+    assert inherited is dense
+    assert torch.equal(override(None, q, k, v, 2, **options), inherited(None, *transformed, 2, **options))
