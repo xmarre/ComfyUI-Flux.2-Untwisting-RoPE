@@ -1,0 +1,92 @@
+name: temporary release prep
+
+on:
+  push:
+    branches:
+      - mirror/release-v0.2.4-20260909
+
+permissions:
+  contents: write
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: mirror/release-v0.2.4-20260909
+          fetch-depth: 0
+      - name: Prepare v0.2.4
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          pyproject = Path('pyproject.toml')
+          text = pyproject.read_text(encoding='utf-8')
+          old = 'version = "0.2.3"'
+          new = 'version = "0.2.4"'
+          if old not in text and new not in text:
+              raise SystemExit('expected Untwist version not found')
+          if old in text:
+              text = text.replace(old, new, 1)
+              pyproject.write_text(text, encoding='utf-8')
+
+          notes = Path('RELEASE_NOTES.md')
+          old_notes = notes.read_text(encoding='utf-8')
+          heading = '# ComfyUI Untwisting RoPE v0.2.4'
+          if not old_notes.startswith(heading):
+              current = '''# ComfyUI Untwisting RoPE v0.2.4
+
+v0.2.4 makes MiniMax-H3 attention preprocessing explicitly composable with numerical attention providers and records the completed Sol-H3 production validation.
+
+## Composable H3 preprocessing contract
+
+- Exposes `attention_preprocess_v1 = (transform, previous_provider)` from the existing H3 attention override.
+- `transform(q, k, v, heads, **kwargs)` applies Untwist's existing reference-key scaling without changing tensor shape, dtype or device.
+- Sparse or specialized providers can consume that preprocessing exactly once, then dispatch through their own numerical backend while retaining the inherited dense provider for dense-required work.
+- Ordinary dense execution is unchanged; consumers that do not implement the optional contract continue through the existing override chain.
+- The contract prevents transformed prefix/reference keys from being scaled a second time when a downstream provider handles sparse and dense-owned rows separately.
+
+## Sol-H3 production validation
+
+The companion implementation is released as [ComfyUI-Sol-H3 v0.1.0](https://github.com/xmarre/ComfyUI-Sol-H3/releases/tag/v0.1.0). The real production stack on an RTX PRO 6000 Blackwell executed Untwist together with Sol-H3, VDN, Spectrum, Diff-Aid and Flow.
+
+Final sampler accounting was:
+
+```text
+sampler_logical_calls       18
+transformer_actual_nfe      14
+spectrum_forecast_calls      4
+
+low:    8 actual / 2 forecast
+high:   4 actual / 2 forecast
+probe:  2 actual / 0 forecast
+```
+
+Untwist preprocessing remained single-application in the audited provider chain. Sol-H3's native VDN and Flow mixed routes retained 1:1 requested/kernel Q-row accounting, zero square-Q expansion and finite arithmetic gates around `~1e-3` relative L2. No Untwist-specific numerical fallback or duplicate preprocessing was observed.
+
+The one extra actual call relative to the 13/5 Sol-bypassed control is the intentional first low-stage `dense -> sol` backend transition; it is not an Untwist regression.
+
+## Validation
+
+- The Untwist CPU suite passed 40 tests on the companion PR head.
+- Sol-H3's pinned native-interop suite exercised the real Untwist preprocessing contract together with VDN, Spectrum, Diff-Aid and Flow.
+- Full production GPU execution then passed on SM120 with the final 18/14/4 Spectrum topology described above.
+
+This release changes interoperability exposure only. Untwist's frequency scaling, reference selection, denoising windows, terminal-PECE capability, Flux/Flux.2 behavior and ordinary dense attention math are unchanged.
+'''
+              notes.write_text(current + '\n---\n\n' + old_notes, encoding='utf-8')
+
+          doc = Path('ATTENTION_PREPROCESS.md')
+          text = doc.read_text(encoding='utf-8')
+          text = text.replace('https://github.com/xmarre/ComfyUI-Sol-H3/pull/1', 'https://github.com/xmarre/ComfyUI-Sol-H3/releases/tag/v0.1.0')
+          text = text.replace('CPU suite: 40 passed. Real combined GPU and audiovisual validation remains outstanding.', 'CPU suite: 40 passed. The combined Sol-H3 v0.1.0 production stack subsequently passed real SM120 GPU execution with Untwist preprocessing consumed exactly once and Spectrum retaining a 14-actual / 4-forecast schedule over 18 logical calls.')
+          doc.write_text(text, encoding='utf-8')
+          PY
+          rm .github/workflows/release-prep-temp.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Prepare Untwisting RoPE v0.2.4 release'
+          git push origin HEAD:mirror/release-v0.2.4-20260909
